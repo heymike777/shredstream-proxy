@@ -1,4 +1,4 @@
-use std::{collections::{HashSet, HashMap}, hash::Hash, sync::atomic::Ordering};
+use std::{collections::HashSet, hash::Hash, sync::atomic::Ordering};
 
 use itertools::Itertools;
 use jito_protos::shredstream::TraceShred;
@@ -64,10 +64,10 @@ impl Default for ShredsStateTracker {
 /// Uses streaming deserialization to handle partial data and FEC recovery for missing shreds
 pub fn reconstruct_shreds(
     packet_batch: PacketBatch,
-    all_shreds: &mut HashMap<
+    all_shreds: &mut ahash::HashMap<
         Slot,
         (
-            HashMap<u32 /* fec_set_index */, HashSet<ComparableShred>>,
+            ahash::HashMap<u32 /* fec_set_index */, HashSet<ComparableShred>>,
             ShredsStateTracker,
         ),
     >,
@@ -112,7 +112,7 @@ pub fn reconstruct_shreds(
                 all_shreds
                     .entry(fec_set_index)
                     .or_default()
-                    .insert(ComparableShred(shred));
+                    .insert(ComparableShred(shred.clone()));
                 slot_fec_indexes_to_iterate.push((slot, fec_set_index));
                 *highest_slot_seen = std::cmp::max(*highest_slot_seen, slot);
                 
@@ -371,9 +371,8 @@ fn try_process_shred_streaming(
     while processed_bytes < buffer.len() {
         match bincode::deserialize::<Vec<solana_entry::entry::Entry>>(&buffer[processed_bytes..]) {
             Ok(new_entries) => {
-                entries.extend(new_entries);
-                // Calculate how many bytes we successfully processed
                 let entry_bytes = bincode::serialized_size(&new_entries).unwrap_or(0) as usize;
+                entries.extend(new_entries);
                 processed_bytes += entry_bytes;
                 
                 // Update the last processed position
