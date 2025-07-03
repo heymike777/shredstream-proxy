@@ -264,7 +264,17 @@ pub fn reconstruct_shreds(
         );
         
         // Log transaction count for this slot
-        println!("Slot {}: parsed {} transactions", slot, txn_count);
+        // println!("Slot {}: parsed {} transactions", slot, txn_count);
+
+        datapoint_warn!(
+            "parsed_transactions",
+            (
+                "slot",
+                format!("{:?}", shred.common_header().slot),
+                String
+            ),
+            ("txn_count", txn_count, i64),
+        );
 
         deshredded_entries.push((*slot, entries, deshredded_payload));
         to_deshred.iter().for_each(|shred| {
@@ -418,9 +428,17 @@ fn try_process_shred_streaming(
             index
         );
         
-        // Log transaction count for streaming processing
-        println!("Slot {}: parsed {} transactions (streaming)", shred.common_header().slot, txn_count);
-        
+        // Log transaction count for streaming processing        
+        datapoint_info!(
+            "parsed_transactions",
+            (
+                "slot",
+                format!("{:?}", shred.common_header().slot),
+                String
+            ),
+            ("txn_count", txn_count, i64),
+        );
+
         Some(entries)
     } else {
         None
