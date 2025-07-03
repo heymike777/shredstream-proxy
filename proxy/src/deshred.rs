@@ -373,6 +373,7 @@ fn try_process_shred_streaming(
         match bincode::deserialize::<Vec<solana_entry::entry::Entry>>(&buffer[processed_bytes..]) {
             Ok(new_entries) => {
                 let entry_bytes = bincode::serialized_size(&new_entries).unwrap_or(0) as usize;
+                let entry_count = new_entries.len();
                 entries.extend(new_entries);
                 processed_bytes += entry_bytes;
                 
@@ -381,7 +382,7 @@ fn try_process_shred_streaming(
                 
                 debug!(
                     "Streaming decoded {} entries from buffer starting at index {}, processed {} bytes",
-                    new_entries.len(),
+                    entry_count,
                     buffer_start,
                     processed_bytes
                 );
