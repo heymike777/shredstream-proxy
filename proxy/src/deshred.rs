@@ -262,6 +262,9 @@ pub fn reconstruct_shreds(
             "Successfully decoded slot: {slot} start_data_complete_idx: {start_data_complete_idx} end_data_complete_idx: {end_data_complete_idx} with entry count: {}, txn count: {txn_count}",
             entries.len(),
         );
+        
+        // Log transaction count for this slot
+        log::info!("Slot {}: parsed {} transactions", slot, txn_count);
 
         deshredded_entries.push((*slot, entries, deshredded_payload));
         to_deshred.iter().for_each(|shred| {
@@ -414,6 +417,9 @@ fn try_process_shred_streaming(
             txn_count,
             index
         );
+        
+        // Log transaction count for streaming processing
+        log::info!("Slot {}: parsed {} transactions (streaming)", shred.common_header().slot, txn_count);
         
         Some(entries)
     } else {
