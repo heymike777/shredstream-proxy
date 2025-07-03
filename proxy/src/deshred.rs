@@ -1,4 +1,5 @@
 use std::{collections::HashSet, hash::Hash, sync::atomic::Ordering};
+use ahash::HashMap;
 
 use itertools::Itertools;
 use jito_protos::shredstream::TraceShred;
@@ -443,10 +444,10 @@ fn find_streaming_buffer_start(state_tracker: &ShredsStateTracker, index: usize)
 
 #[allow(unused)]
 fn debug_remaining_shreds(
-    all_shreds: &mut HashMap<
+    all_shreds: &mut ahash::HashMap<
         Slot,
         (
-            HashMap<u32, HashSet<ComparableShred>>,
+            ahash::HashMap<u32, HashSet<ComparableShred>>,
             ShredsStateTracker,
         ),
     >,
