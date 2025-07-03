@@ -12,7 +12,7 @@ use solana_ledger::{
         ReedSolomonCache, ShredType, Shredder,
     },
 };
-use solana_metrics::datapoint_warn;
+use solana_metrics::{datapoint_info, datapoint_warn};
 use solana_perf::packet::PacketBatch;
 use solana_sdk::clock::{Slot, MAX_PROCESSING_AGE};
 
@@ -266,7 +266,7 @@ pub fn reconstruct_shreds(
         // Log transaction count for this slot
         // println!("Slot {}: parsed {} transactions", slot, txn_count);
 
-        datapoint_warn!(
+        datapoint_info!(
             "parsed_transactions",
             (
                 "slot",
