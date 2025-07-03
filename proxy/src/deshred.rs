@@ -268,11 +268,7 @@ pub fn reconstruct_shreds(
 
         datapoint_info!(
             "parsed_transactions",
-            (
-                "slot",
-                format!("{:?}", shred.common_header().slot),
-                String
-            ),
+            ("slot", format!("{:?}", slot), String),
             ("txn_count", txn_count, i64),
         );
 
