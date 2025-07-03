@@ -1,4 +1,4 @@
-use std::{collections::HashSet, hash::Hash, sync::atomic::Ordering};
+use std::{collections::{HashSet, HashMap}, hash::Hash, sync::atomic::Ordering};
 
 use itertools::Itertools;
 use jito_protos::shredstream::TraceShred;
@@ -27,7 +27,7 @@ enum ShredStatus {
     DataComplete,
 }
 
-/// Tracks per-slot shred information for data shreds
+/// Tracks per-slot shred information for data shreds with streaming support
 /// Guaranteed to have MAX_DATA_SHREDS_PER_SLOT entries in each Vec
 #[derive(Debug)]
 pub struct ShredsStateTracker {
@@ -39,7 +39,12 @@ pub struct ShredsStateTracker {
     already_recovered_fec_sets: Vec<bool>,
     /// array of bools that track which data shred indexes have been already deshredded
     already_deshredded: Vec<bool>,
+    /// Buffered data for streaming deserialization - maps from start index to accumulated data
+    streaming_buffers: HashMap<usize, Vec<u8>>,
+    /// Tracks the last processed index for each streaming buffer
+    last_processed_index: HashMap<usize, usize>,
 }
+
 impl Default for ShredsStateTracker {
     fn default() -> Self {
         Self {
@@ -47,21 +52,22 @@ impl Default for ShredsStateTracker {
             data_shreds: vec![None; MAX_DATA_SHREDS_PER_SLOT],
             already_recovered_fec_sets: vec![false; MAX_DATA_SHREDS_PER_SLOT],
             already_deshredded: vec![false; MAX_DATA_SHREDS_PER_SLOT],
+            streaming_buffers: HashMap::default(),
+            last_processed_index: HashMap::default(),
         }
     }
 }
 
 /// Returns the number of shreds reconstructed
 /// Updates all_shreds with current state, and deshredded_entries with returned values
-/// receive shreds per FEC set, attempting to recover the other shreds in the fec set so you do not have to wait until all data shreds have arrived.
-/// every time a fec is recovered, scan for neighbouring DATA_COMPLETE_SHRED flags in the shreds, attempting to deserialize into solana entries when there are no missing shreds between the DATA_COMPLETE_SHRED flags.
-/// note that an FEC set doesn't necessarily contain DATA_COMPLETE_SHRED in the last shred. when deserializing the bincode data, you must use data between shreds starting at the last DATA_COMPLETE_SHRED (not inclusive) to the next DATA_COMPLETE_SHRED (inclusive)
+/// Processes shreds immediately when they arrive, attempting to decode transactions as fast as possible
+/// Uses streaming deserialization to handle partial data and FEC recovery for missing shreds
 pub fn reconstruct_shreds(
     packet_batch: PacketBatch,
-    all_shreds: &mut ahash::HashMap<
+    all_shreds: &mut HashMap<
         Slot,
         (
-            ahash::HashMap<u32 /* fec_set_index */, HashSet<ComparableShred>>,
+            HashMap<u32 /* fec_set_index */, HashSet<ComparableShred>>,
             ShredsStateTracker,
         ),
     >,
@@ -73,7 +79,8 @@ pub fn reconstruct_shreds(
 ) -> usize {
     deshredded_entries.clear();
     slot_fec_indexes_to_iterate.clear();
-    // ingest all packets
+    
+    // ingest all packets and process immediately
     for packet in packet_batch.iter().filter_map(|p| p.data(..)) {
         match solana_ledger::shred::Shred::new_from_serialized_shred(packet.to_vec())
             .and_then(Shred::try_from)
@@ -83,18 +90,21 @@ pub fn reconstruct_shreds(
                 let index = shred.index() as usize;
                 let fec_set_index = shred.fec_set_index();
                 let (all_shreds, state_tracker) = all_shreds.entry(slot).or_default();
+                
                 if highest_slot_seen.saturating_sub(SLOT_LOOKBACK) > slot {
                     debug!(
                         "Old shred slot: {slot}, fec_set_index: {fec_set_index}, index: {index}"
                     );
                     continue;
                 }
+                
                 if state_tracker.already_recovered_fec_sets[fec_set_index as usize]
                     || state_tracker.already_deshredded[index]
                 {
                     debug!("Already completed slot: {slot}, fec_set_index: {fec_set_index}, index: {index}");
                     continue;
                 }
+                
                 let Some(_shred_index) = update_state_tracker(&shred, state_tracker) else {
                     continue;
                 };
@@ -103,8 +113,13 @@ pub fn reconstruct_shreds(
                     .entry(fec_set_index)
                     .or_default()
                     .insert(ComparableShred(shred));
-                slot_fec_indexes_to_iterate.push((slot, fec_set_index)); // use Vec so we can sort to make sure if any earlier FEC sets have DATA_SHRED_COMPLETE, later entries can use the flag to find the bounds
+                slot_fec_indexes_to_iterate.push((slot, fec_set_index));
                 *highest_slot_seen = std::cmp::max(*highest_slot_seen, slot);
+                
+                // Try to process this shred immediately for streaming
+                if let Some(entries) = try_process_shred_streaming(&shred, state_tracker, metrics) {
+                    deshredded_entries.push((slot, entries, Vec::new())); // No raw payload for streaming
+                }
             }
             Err(e) => {
                 if TraceShred::decode(packet).is_ok() {
@@ -117,8 +132,7 @@ pub fn reconstruct_shreds(
     slot_fec_indexes_to_iterate.sort_unstable();
     slot_fec_indexes_to_iterate.dedup();
 
-    // try recovering by FEC set
-    // already checked if FEC set is completed or deserialized
+    // try recovering by FEC set for missing shreds
     let mut total_recovered_count = 0;
     for (slot, fec_set_index) in slot_fec_indexes_to_iterate.iter() {
         let (all_shreds, state_tracker) = all_shreds.entry(*slot).or_default();
@@ -146,7 +160,7 @@ pub fn reconstruct_shreds(
             .map(|s| s.0.clone())
             .collect_vec();
         let recovered = match solana_ledger::shred::merkle::recover(merkle_shreds, rs_cache) {
-            Ok(r) => r, // data shreds followed by code shreds (whatever was missing from to_deshred_payload)
+            Ok(r) => r,
             Err(e) => {
                 warn!(
                     "Failed to recover shreds for slot {slot} fec_set_index {fec_set_index}. num_expected_data_shreds: {num_expected_data_shreds}, num_data_shreds: {num_data_shreds} num_expected_coding_shreds: {num_expected_coding_shreds} num_coding_shreds: {num_coding_shreds} Err: {e}",
@@ -162,9 +176,13 @@ pub fn reconstruct_shreds(
                     if update_state_tracker(&shred, state_tracker).is_none() {
                         continue; // already seen before in state tracker
                     }
-                    // shreds.insert(ComparableShred(shred)); // optional since all data shreds are in state_tracker
                     total_recovered_count += 1;
                     fec_set_recovered_count += 1;
+                    
+                    // Try to process recovered shred immediately
+                    if let Some(entries) = try_process_shred_streaming(&shred, state_tracker, metrics) {
+                        deshredded_entries.push((*slot, entries, Vec::new()));
+                    }
                 }
                 Err(e) => warn!(
                     "Failed to recover shred for slot {slot}, fec set: {fec_set_index}. Err: {e}"
@@ -179,7 +197,7 @@ pub fn reconstruct_shreds(
         }
     }
 
-    // deshred and bincode deserialize
+    // Process any remaining complete segments that weren't handled by streaming
     for (slot, fec_set_index) in slot_fec_indexes_to_iterate.iter() {
         let (_all_shreds, state_tracker) = all_shreds.entry(*slot).or_default();
         let Some((start_data_complete_idx, end_data_complete_idx, unknown_start)) =
@@ -187,6 +205,7 @@ pub fn reconstruct_shreds(
         else {
             continue;
         };
+        
         if unknown_start {
             metrics
                 .unknown_start_position_count
@@ -236,7 +255,7 @@ pub fn reconstruct_shreds(
         metrics
             .entry_count
             .fetch_add(entries.len() as u64, Ordering::Relaxed);
-        let txn_count = entries.iter().map(|e| e.transactions.len() as u64).sum();
+        let txn_count = entries.iter().map(|e| e.transactions.len() as u64).sum::<u64>();
         metrics.txn_count.fetch_add(txn_count, Ordering::Relaxed);
         debug!(
             "Successfully decoded slot: {slot} start_data_complete_idx: {start_data_complete_idx} end_data_complete_idx: {end_data_complete_idx} with entry count: {}, txn count: {txn_count}",
@@ -253,9 +272,10 @@ pub fn reconstruct_shreds(
         })
     }
 
+    // Cleanup old slots
     if all_shreds.len() > MAX_PROCESSING_AGE {
         let slot_threshold = highest_slot_seen.saturating_sub(SLOT_LOOKBACK);
-        let mut incomplete_fec_sets = ahash::HashMap::<Slot, Vec<_>>::default();
+        let mut incomplete_fec_sets = HashMap::<Slot, Vec<_>>::default();
         let mut incomplete_fec_sets_count = 0;
         all_shreds.retain(|slot, (fec_set_indexes, state_tracker)| {
             if *slot >= slot_threshold {
@@ -313,17 +333,126 @@ pub fn reconstruct_shreds(
     total_recovered_count
 }
 
+/// Try to process a shred immediately for streaming deserialization
+/// Returns Some(entries) if we can decode any entries from this shred
+fn try_process_shred_streaming(
+    shred: &Shred,
+    state_tracker: &mut ShredsStateTracker,
+    metrics: &ShredMetrics,
+) -> Option<Vec<solana_entry::entry::Entry>> {
+    if shred.shred_type() != ShredType::Data {
+        return None;
+    }
+    
+    let index = shred.index() as usize;
+    if state_tracker.already_deshredded[index] {
+        return None;
+    }
+    
+    // Get the data from this shred
+    let shred_data = match solana_ledger::shred::layout::get_data(shred.payload()) {
+        Ok(data) => data,
+        Err(_) => return None,
+    };
+    
+    // Find the appropriate streaming buffer for this shred
+    let buffer_start = find_streaming_buffer_start(state_tracker, index);
+    let buffer = state_tracker.streaming_buffers.entry(buffer_start).or_default();
+    let last_processed = state_tracker.last_processed_index.entry(buffer_start).or_default();
+    
+    // Add this shred's data to the buffer
+    buffer.extend_from_slice(&shred_data);
+    
+    // Try to deserialize entries from the accumulated buffer
+    let mut entries = Vec::new();
+    let mut processed_bytes = 0;
+    
+    // Try to deserialize complete entries from the buffer
+    while processed_bytes < buffer.len() {
+        match bincode::deserialize::<Vec<solana_entry::entry::Entry>>(&buffer[processed_bytes..]) {
+            Ok(new_entries) => {
+                entries.extend(new_entries);
+                // Calculate how many bytes we successfully processed
+                let entry_bytes = bincode::serialized_size(&new_entries).unwrap_or(0) as usize;
+                processed_bytes += entry_bytes;
+                
+                // Update the last processed position
+                *last_processed = index;
+                
+                debug!(
+                    "Streaming decoded {} entries from buffer starting at index {}, processed {} bytes",
+                    new_entries.len(),
+                    buffer_start,
+                    processed_bytes
+                );
+            }
+            Err(_) => {
+                // Can't deserialize more entries, break
+                break;
+            }
+        }
+    }
+    
+    // Remove processed bytes from the buffer
+    if processed_bytes > 0 {
+        buffer.drain(..processed_bytes);
+    }
+    
+    // If we found entries, update metrics and mark as processed
+    if !entries.is_empty() {
+        metrics.entry_count.fetch_add(entries.len() as u64, Ordering::Relaxed);
+        let txn_count = entries.iter().map(|e| e.transactions.len() as u64).sum::<u64>();
+        metrics.txn_count.fetch_add(txn_count, Ordering::Relaxed);
+        
+        // Mark this shred as processed
+        state_tracker.already_deshredded[index] = true;
+        
+        debug!(
+            "Streaming decoded {} entries with {} transactions from shred index {}",
+            entries.len(),
+            txn_count,
+            index
+        );
+        
+        Some(entries)
+    } else {
+        None
+    }
+}
+
+/// Find the start index for a streaming buffer based on consecutive shreds
+fn find_streaming_buffer_start(state_tracker: &ShredsStateTracker, index: usize) -> usize {
+    // Check if we already have a buffer that includes this index
+    for (buffer_start, _) in &state_tracker.streaming_buffers {
+        if *buffer_start <= index && index <= *buffer_start + 20 { // Assume max 20 shreds per buffer
+            return *buffer_start;
+        }
+    }
+    
+    // Find the earliest consecutive shred starting from this index
+    let mut start = index;
+    while start > 0 {
+        if state_tracker.data_shreds[start - 1].is_some() {
+            start -= 1;
+        } else {
+            break;
+        }
+    }
+    
+    start
+}
+
 #[allow(unused)]
 fn debug_remaining_shreds(
-    all_shreds: &mut ahash::HashMap<
+    all_shreds: &mut HashMap<
         Slot,
         (
-            ahash::HashMap<u32, HashSet<ComparableShred>>,
+            HashMap<u32, HashSet<ComparableShred>>,
             ShredsStateTracker,
         ),
     >,
 ) {
-    let mut incomplete_fec_sets = ahash::HashMap::<Slot, Vec<_>>::default();
+    let mut incomplete_fec_sets = HashMap::<Slot, Vec<_>>::default();
     let mut incomplete_fec_sets_count = 0;
     all_shreds
         .iter()
