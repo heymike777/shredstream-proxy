@@ -263,17 +263,24 @@ pub fn reconstruct_shreds(
             entries.len(),
         );
         
+        // Debug: Log entry count even if no transactions
+        println!("DEBUG: Slot {}: processed {} entries with {} transactions", slot, entries.len(), txn_count);
+        
         // Log transaction count for this slot
         // println!("Slot {}: parsed {} transactions", slot, txn_count);
 
         // Debug print to verify this code path is being executed
         println!("DEBUG: Slot {}: parsed {} transactions", slot, txn_count);
         
-        datapoint_info!(
-            "parsed_transactions",
-            ("slot", *slot, i64),
-            ("txn_count", txn_count, i64),
-        );
+        if txn_count > 0 {
+            datapoint_info!(
+                "parsed_transactions",
+                ("slot", *slot, i64),
+                ("txn_count", txn_count, i64),
+            );
+        } else {
+            println!("DEBUG: Slot {}: no transactions parsed", slot);
+        }
 
         deshredded_entries.push((*slot, entries, deshredded_payload));
         to_deshred.iter().for_each(|shred| {
@@ -427,15 +434,22 @@ fn try_process_shred_streaming(
             index
         );
         
+        // Debug: Log entry count even if no transactions
+        println!("DEBUG: Slot {}: processed {} entries with {} transactions (streaming)", shred.common_header().slot, entries.len(), txn_count);
+        
         // Log transaction count for streaming processing        
         // Debug print to verify this code path is being executed
         println!("DEBUG: Slot {}: parsed {} transactions (streaming)", shred.common_header().slot, txn_count);
         
-        datapoint_info!(
-            "parsed_transactions",
-            ("slot", shred.common_header().slot, i64),
-            ("txn_count", txn_count, i64),
-        );
+        if txn_count > 0 {
+            datapoint_info!(
+                "parsed_transactions",
+                ("slot", shred.common_header().slot, i64),
+                ("txn_count", txn_count, i64),
+            );
+        } else {
+            println!("DEBUG: Slot {}: no transactions parsed (streaming)", shred.common_header().slot);
+        }
 
         Some(entries)
     } else {
