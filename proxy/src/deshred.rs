@@ -266,9 +266,12 @@ pub fn reconstruct_shreds(
         // Log transaction count for this slot
         // println!("Slot {}: parsed {} transactions", slot, txn_count);
 
+        // Debug print to verify this code path is being executed
+        println!("DEBUG: Slot {}: parsed {} transactions", slot, txn_count);
+        
         datapoint_info!(
             "parsed_transactions",
-            ("slot", format!("{:?}", slot), String),
+            ("slot", *slot, i64),
             ("txn_count", txn_count, i64),
         );
 
@@ -425,13 +428,12 @@ fn try_process_shred_streaming(
         );
         
         // Log transaction count for streaming processing        
+        // Debug print to verify this code path is being executed
+        println!("DEBUG: Slot {}: parsed {} transactions (streaming)", shred.common_header().slot, txn_count);
+        
         datapoint_info!(
             "parsed_transactions",
-            (
-                "slot",
-                format!("{:?}", shred.common_header().slot),
-                String
-            ),
+            ("slot", shred.common_header().slot, i64),
             ("txn_count", txn_count, i64),
         );
 
