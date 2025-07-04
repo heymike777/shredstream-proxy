@@ -81,7 +81,7 @@ pub fn reconstruct_shreds(
     deshredded_entries.clear();
     slot_fec_indexes_to_iterate.clear();
     
-    println!("DEBUG: Starting reconstruct_shreds with {} packets", packet_batch.len());
+    // println!("DEBUG: Starting reconstruct_shreds with {} packets", packet_batch.len());
     
     // ingest all packets and process immediately
     for packet in packet_batch.iter().filter_map(|p| p.data(..)) {
@@ -89,7 +89,7 @@ pub fn reconstruct_shreds(
             .and_then(Shred::try_from)
         {
             Ok(shred) => {
-                println!("DEBUG: Successfully decoded shred for slot {}", shred.common_header().slot);
+                // println!("DEBUG: Successfully decoded shred for slot {}", shred.common_header().slot);
                 let slot = shred.common_header().slot;
                 let index = shred.index() as usize;
                 let fec_set_index = shred.fec_set_index();
@@ -122,7 +122,7 @@ pub fn reconstruct_shreds(
                 
                 // Try to process this shred immediately for streaming
                 if let Some(entries) = try_process_shred_streaming(&shred, state_tracker, metrics) {
-                    println!("DEBUG: Streaming processing returned {} entries for slot {}", entries.len(), slot);
+                    // println!("DEBUG: Streaming processing returned {} entries for slot {}", entries.len(), slot);
                     deshredded_entries.push((slot, entries, Vec::new())); // No raw payload for streaming
                 }
             }
@@ -219,7 +219,7 @@ pub fn reconstruct_shreds(
 
         let to_deshred =
             &state_tracker.data_shreds[start_data_complete_idx..=end_data_complete_idx];
-        println!("DEBUG: Attempting to deshred {} shreds for slot {}", to_deshred.len(), slot);
+        // println!("DEBUG: Attempting to deshred {} shreds for slot {}", to_deshred.len(), slot);
         let deshredded_payload = match Shredder::deshred(
             to_deshred.iter().map(|s| s.as_ref().unwrap().payload()),
         ) {
@@ -242,7 +242,7 @@ pub fn reconstruct_shreds(
             &deshredded_payload,
         ) {
             Ok(entries) => {
-                println!("DEBUG: Successfully deserialized {} entries for slot {}", entries.len(), slot);
+                // println!("DEBUG: Successfully deserialized {} entries for slot {}", entries.len(), slot);
                 entries
             }
             Err(e) => {
@@ -272,14 +272,8 @@ pub fn reconstruct_shreds(
         );
         
         // Debug: Log entry count even if no transactions
-        println!("DEBUG: Slot {}: processed {} entries with {} transactions", slot, entries.len(), txn_count);
-        
-        // Log transaction count for this slot
-        // println!("Slot {}: parsed {} transactions", slot, txn_count);
-
-        // Debug print to verify this code path is being executed
-        println!("DEBUG: Slot {}: parsed {} transactions", slot, txn_count);
-        
+        // println!("DEBUG: Slot {}: processed {} entries with {} transactions", slot, entries.len(), txn_count);
+                
         if txn_count > 0 {
             datapoint_info!(
                 "parsed_transactions",
@@ -287,7 +281,7 @@ pub fn reconstruct_shreds(
                 ("txn_count", txn_count, i64),
             );
         } else {
-            println!("DEBUG: Slot {}: no transactions parsed", slot);
+            // println!("DEBUG: Slot {}: no transactions parsed", slot);
         }
 
         deshredded_entries.push((*slot, entries, deshredded_payload));
@@ -358,7 +352,7 @@ pub fn reconstruct_shreds(
             .fetch_add(total_recovered_count as u64, Ordering::Relaxed);
     }
 
-    println!("DEBUG: reconstruct_shreds completed with {} recovered shreds", total_recovered_count);
+    // println!("DEBUG: reconstruct_shreds completed with {} recovered shreds", total_recovered_count);
     total_recovered_count
 }
 
@@ -444,11 +438,7 @@ fn try_process_shred_streaming(
         );
         
         // Debug: Log entry count even if no transactions
-        println!("DEBUG: Slot {}: processed {} entries with {} transactions (streaming)", shred.common_header().slot, entries.len(), txn_count);
-        
-        // Log transaction count for streaming processing        
-        // Debug print to verify this code path is being executed
-        println!("DEBUG: Slot {}: parsed {} transactions (streaming)", shred.common_header().slot, txn_count);
+        // println!("DEBUG: Slot {}: processed {} entries with {} transactions (streaming)", shred.common_header().slot, entries.len(), txn_count);
         
         if txn_count > 0 {
             datapoint_info!(
@@ -457,7 +447,7 @@ fn try_process_shred_streaming(
                 ("txn_count", txn_count, i64),
             );
         } else {
-            println!("DEBUG: Slot {}: no transactions parsed (streaming)", shred.common_header().slot);
+            // println!("DEBUG: Slot {}: no transactions parsed (streaming)", shred.common_header().slot);
         }
 
         Some(entries)

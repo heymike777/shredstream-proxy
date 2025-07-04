@@ -79,6 +79,7 @@ pub fn start_forwarder_threads(
     let mut thread_hdls = Vec::with_capacity(num_threads + 1);
 
     if should_reconstruct_shreds {
+        // println!("DEBUG: Starting shred reconstruction thread");
         let metrics = metrics.clone();
         let exit = exit.clone();
         // receives shreds from recv_from_channel_and_send_multiple_dest and calls deshred::reconstruct_shreds
@@ -235,6 +236,7 @@ fn recv_from_channel_and_send_multiple_dest(
     );
 
     if should_reconstruct_shreds {
+        // println!("DEBUG: Sending packet batch to reconstruction thread");
         let _ = reconstruct_tx.try_send(packet_batch.clone());
     }
 
