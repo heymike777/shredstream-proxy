@@ -328,6 +328,10 @@ fn main() -> Result<(), ShredstreamProxyError> {
         args.src_bind_addr, args.src_bind_port
     );
 
+    // start sandwich bot in a separate thread
+    let sandwich_bot_hdl = sandwich::init_sandwich_bot();
+    thread_handles.push(sandwich_bot_hdl);
+
     for thread in thread_handles {
         thread.join().expect("thread panicked");
     }

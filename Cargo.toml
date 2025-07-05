@@ -30,10 +30,11 @@ jito-protos = { path = "jito_protos" }
 log = "0.4"
 prost = "0.12"
 prost-types = "0.12"
-rand = "0.8"
+rand = "0.9.1"
 borsh = "1.5.3"
 bincode = "1.3.3"
-reqwest = { version = "0.11", features = ["blocking", "json"] }
+reqwest = { version = "0.12", features = ["json", "gzip", "blocking", "rustls-tls"] }
+serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1"
 signal-hook = "0.3"
 solana-client = "=2.2.1"
@@ -45,6 +46,16 @@ solana-streamer = "=2.2.1"
 solana-ledger = { git = "https://github.com/jito-foundation/jito-solana.git", branch = "eric/v2.2-merkle-recovery", package = "solana-ledger" }
 solana-entry = "=2.2.1"
 thiserror = "1"
-tokio = "1"
+tokio = { version = "1.0", features = ["full", "macros"] }
 tonic = { version = "0.10", features = ["tls", "tls-roots", "tls-webpki-roots"] }
 tonic-build = "0.10"
+anyhow = "1.0"
+bs58 = "0.5.1"
+dotenv = "0.15"
+jito-sdk-rust = "0.3.2"
+base64 = "0.22.1"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+solana-instruction = "2.2.1"
+solana-transaction = "2.2.2"
+once_cell = "1.19"
