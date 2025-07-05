@@ -35,6 +35,7 @@ mod deshred;
 pub mod forwarder;
 mod heartbeat;
 mod server;
+mod sandwich;
 mod token_authenticator;
 
 #[derive(Clone, Debug, Parser)]
@@ -329,7 +330,11 @@ fn main() -> Result<(), ShredstreamProxyError> {
     );
 
     // start sandwich bot in a separate thread
-    let sandwich_bot_hdl = sandwich::init_sandwich_bot();
+    let sandwich_bot_hdl = spawn(move || {
+        if let Err(e) = sandwich::init_sandwich_bot() {
+            eprintln!("Sandwich bot error: {:?}", e);
+        }
+    });
     thread_handles.push(sandwich_bot_hdl);
 
     for thread in thread_handles {

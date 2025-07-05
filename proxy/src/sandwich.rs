@@ -47,13 +47,13 @@ pub fn init_tracing() {
         .init();
 }
 
-pub mod shared {
-    tonic::include_proto!("shared");
-}
+// pub mod shared {
+//     tonic::include_proto!("shared");
+// }
 
-pub mod shredstream {
-    tonic::include_proto!("shredstream");
-}
+// pub mod shredstream {
+//     tonic::include_proto!("shredstream");
+// }
 
 fn load_keypair_from_base58(env_var: &str) -> Keypair {
     let bs58_string = std::env::var(env_var).expect("PRIVATE_KEY not set");
@@ -76,7 +76,7 @@ fn get_random_tip_account() -> Result<String> {
         "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
     ];
 
-    let random_index = rand::rng().random_range(0..tip_accounts.len());
+    let random_index = rand::thread_rng().gen_range(0..tip_accounts.len());
     Ok(tip_accounts[random_index].to_string())
 }
 
@@ -206,7 +206,7 @@ pub async fn send_bundle(params: Value) -> Result<()> {
         "http://mike:Mitim112358@146.190.18.171:8888",
         "http://mike:Mitim112358@134.209.92.71:8888",
     ];
-    let random_index = rand::rng().random_range(0..proxies.len());
+    let random_index = rand::thread_rng().gen_range(0..proxies.len());
     let proxy_url = proxies[random_index];
     let proxy = Proxy::all(proxy_url)?;
 
@@ -270,7 +270,7 @@ pub async fn process_entry(entry: &Entry) -> Result<()> {
     Ok(())
 }
 
-pub async fn init_sandwich_bot() {
+pub async fn init_sandwich_bot() -> Result<()> {
     println!("init_sandwich_bot");
 
     dotenv::dotenv().ok();
